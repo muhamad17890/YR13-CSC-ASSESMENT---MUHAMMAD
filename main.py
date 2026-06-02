@@ -528,3 +528,4 @@ class TaskManagerApp(tk.Tk):
 if __name__ == "__main__":
     app = TaskManagerApp()
     app.mainloop()
+
