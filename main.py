@@ -1,11 +1,3 @@
-"""
-Student Task & Priority Manager
-================================
-A tkinter-based task management application for secondary school students.
-Supports login/signup, task creation with priority levels, due dates,
-completion tracking, and filtering.
-"""
-
 import tkinter as tk
 from tkinter import ttk, messagebox
 import json
@@ -13,22 +5,19 @@ import os
 import hashlib
 from datetime import datetime, date
 
-# ─────────────────────────────────────────────
-#  COLOUR CONSTANTS
-# ─────────────────────────────────────────────
-SIDEBAR_BG    = "#3d2b6b"   # deep purple sidebar
-SIDEBAR_SEL   = "#c0392b"   # red highlight for active item
+SIDEBAR_BG    = "#3d2b6b"
+SIDEBAR_SEL   = "#c0392b"
 SIDEBAR_FG    = "#ffffff"
-TOPBAR_BG     = "#5b3fa0"   # medium purple topbar
-CONTENT_BG    = "#f0f0f5"   # light grey content area
+TOPBAR_BG     = "#5b3fa0"
+CONTENT_BG    = "#f0f0f5"
 CARD_BG       = "#ffffff"
 ACCENT_PURPLE = "#7c5cbf"
 BTN_ADD       = "#7c5cbf"
 BTN_LOGIN     = "#3d5af1"
-HIGH_COLOR    = "#e74c3c"   # red  – high priority flag
-MED_COLOR     = "#f39c12"   # orange – medium priority
-LOW_COLOR     = "#27ae60"   # green  – low priority
-DONE_COLOR    = "#27ae60"   # green tick
+HIGH_COLOR    = "#e74c3c"
+MED_COLOR     = "#f39c12"
+LOW_COLOR     = "#27ae60"
+DONE_COLOR    = "#27ae60"
 TEXT_DARK     = "#1a1a2e"
 TEXT_MID      = "#555577"
 
@@ -38,9 +27,6 @@ PRIORITY_ICONS  = {"High": "🚩", "Medium": "⚡", "Low": "✅"}
 DATA_FILE  = "tasks.json"
 USERS_FILE = "users.json"
 
-# ─────────────────────────────────────────────
-#  DATA HELPERS
-# ─────────────────────────────────────────────
 
 def load_json(path, default):
     if os.path.exists(path):
@@ -58,33 +44,25 @@ def save_json(path, data):
 def hash_pw(pw):
     return hashlib.sha256(pw.encode()).hexdigest()
 
-# ─────────────────────────────────────────────
-#  MAIN APPLICATION
-# ─────────────────────────────────────────────
 
 class TaskManagerApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Student Task Manager")
+        self.title(" Task Manager")
         self.geometry("880x580")
         self.minsize(800, 500)
         self.configure(bg=SIDEBAR_BG)
 
-        # State
         self.current_user  = None
         self.current_view  = "all"
         self.tasks         = []
         self.users         = load_json(USERS_FILE, {})
 
-        # Build layout frames
         self._build_topbar()
         self._build_sidebar()
         self._build_content()
 
-        # Start on login screen
         self._show_login()
-
-    # ── TOP BAR ──────────────────────────────
 
     def _build_topbar(self):
         self.topbar = tk.Frame(self, bg=TOPBAR_BG, height=48)
@@ -94,7 +72,6 @@ class TaskManagerApp(tk.Tk):
         tk.Label(self.topbar, text="TASK MANAGER", bg=TOPBAR_BG,
                  fg=SIDEBAR_FG, font=("Georgia", 15, "bold")).pack(side="left", padx=16, pady=10)
 
-        # Right-side buttons
         self.btn_add = tk.Button(self.topbar, text="＋ Add Task",
                                  bg=BTN_ADD, fg="white",
                                  font=("Arial", 10, "bold"), bd=0,
@@ -114,19 +91,15 @@ class TaskManagerApp(tk.Tk):
                                   padx=12, pady=4, cursor="hand2",
                                   command=self._logout_or_login)
 
-        # Pack right-to-left
         self.btn_auth.pack(side="right", padx=6, pady=8)
         self.btn_filter.pack(side="right", padx=4, pady=8)
         self.btn_add.pack(side="right", padx=4, pady=8)
 
-        # Active filter label
         self.filter_var = tk.StringVar(value="All")
         self.filter_label = tk.Label(self.topbar, textvariable=self.filter_var,
                                      bg=TOPBAR_BG, fg="#ddccff",
                                      font=("Arial", 9))
         self.filter_label.pack(side="right", padx=2)
-
-    # ── SIDEBAR ───────────────────────────────
 
     def _build_sidebar(self):
         self.sidebar = tk.Frame(self, bg=SIDEBAR_BG, width=180)
@@ -155,14 +128,12 @@ class TaskManagerApp(tk.Tk):
         for key, btn in self.nav_btns.items():
             btn.configure(bg=SIDEBAR_SEL if key == active_key else SIDEBAR_BG)
 
-    # ── CONTENT AREA ─────────────────────────
-
     def _build_content(self):
         self.content = tk.Frame(self, bg=CONTENT_BG)
         self.content.pack(side="left", fill="both", expand=True)
 
     def _clear_content(self):
-        self.unbind("<Return>") # Fixes the global keypress crash bug
+        self.unbind("<Return>")
         for w in self.content.winfo_children():
             w.destroy()
 
@@ -175,8 +146,6 @@ class TaskManagerApp(tk.Tk):
                 self._show_login()
         else:
             self._show_login()
-
-    # ── VIEWS ─────────────────────────────────
 
     def _switch_view(self, view_key):
         if not self.current_user:
@@ -197,24 +166,20 @@ class TaskManagerApp(tk.Tk):
             "upcoming":  "Upcoming Tasks",
         }
 
-        # Header
         header = tk.Frame(self.content, bg=CONTENT_BG)
         header.pack(fill="x", padx=24, pady=(20, 8))
         tk.Label(header, text=titles.get(view_key, "Tasks"), bg=CONTENT_BG,
                  fg=TEXT_DARK, font=("Georgia", 18, "bold")).pack(side="left")
 
-        # Scrollable canvas setup
         canvas = tk.Canvas(self.content, bg=CONTENT_BG, highlightthickness=0)
         scrollbar = ttk.Scrollbar(self.content, orient="vertical", command=canvas.yview)
         self.task_frame = tk.Frame(canvas, bg=CONTENT_BG)
 
-        # Dynamic scroll bounds tracking
         self.task_frame.bind(
             "<Configure>",
             lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
 
-        # Dynamic responsive layout resizing window width connection
         canvas_window = canvas.create_window((0, 0), window=self.task_frame, anchor="nw")
         canvas.bind(
             "<Configure>",
@@ -225,7 +190,6 @@ class TaskManagerApp(tk.Tk):
         canvas.pack(side="left", fill="both", expand=True, padx=(20, 0), pady=4)
         scrollbar.pack(side="right", fill="y")
 
-        # Cross-platform safe mousewheel setup
         canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(-1 * (e.delta // 120), "units"))
 
         self._render_tasks(view_key)
@@ -236,7 +200,6 @@ class TaskManagerApp(tk.Tk):
 
         tasks = self.tasks
 
-        # Filter views safely
         if view_key == "high":
             tasks = [t for t in tasks if t["priority"] == "High" and not t["done"]]
         elif view_key == "completed":
@@ -247,10 +210,9 @@ class TaskManagerApp(tk.Tk):
                 try:
                     return datetime.strptime(t["due_date"], "%Y-%m-%d").date()
                 except ValueError:
-                    return date.max # Safely shifts invalid strings to the bottom
+                    return date.max
             tasks = sorted(tasks, key=parse_date)
 
-        # Dropdown management filtering
         if filter_priority and filter_priority != "All":
             tasks = [t for t in tasks if t["priority"] == filter_priority]
 
@@ -267,7 +229,6 @@ class TaskManagerApp(tk.Tk):
         card = tk.Frame(parent, bg=CARD_BG, bd=0,
                         highlightthickness=1,
                         highlightbackground="#d8d8e8")
-        # Shifted right padding to prevent scrollbar overlapping
         card.pack(fill="x", padx=(4, 15), pady=4)
 
         pri_color = PRIORITY_COLORS.get(task["priority"], "#999")
@@ -315,8 +276,6 @@ class TaskManagerApp(tk.Tk):
             self._save_tasks()
             self._render_tasks(self.current_view)
 
-    # ── FILTER ────────────────────────────────
-
     def _toggle_filter(self):
         menu = tk.Menu(self, tearoff=0)
         for p in ["All", "High", "Medium", "Low"]:
@@ -328,8 +287,6 @@ class TaskManagerApp(tk.Tk):
     def _apply_filter(self, priority):
         self.filter_var.set(priority)
         self._render_tasks(self.current_view, filter_priority=priority)
-
-    # ── ADD TASK DIALOG ───────────────────────
 
     def _open_add_task(self):
         if not self.current_user:
@@ -377,7 +334,6 @@ class TaskManagerApp(tk.Tk):
                 messagebox.showwarning("Missing", "Please enter a task name.", parent=dialog)
                 return
 
-            # Form validation checks format before appending dictionary
             if due_date_str:
                 try:
                     datetime.strptime(due_date_str, "%Y-%m-%d")
@@ -401,8 +357,6 @@ class TaskManagerApp(tk.Tk):
                   font=("Arial", 11, "bold"), bd=0, padx=20, pady=8,
                   cursor="hand2", command=submit).pack(pady=16)
 
-    # ── LOGIN / SIGNUP ────────────────────────
-
     def _show_login(self):
         self._clear_content()
         self.current_view = "login"
@@ -423,7 +377,6 @@ class TaskManagerApp(tk.Tk):
         u_entry.insert(0, "Username")
         u_entry.pack(side="left")
 
-        # Validated placeholder configurations
         u_entry.bind("<FocusIn>",  lambda e: u_entry.delete(0, "end") if u_entry.get() == "Username" else None)
         u_entry.bind("<FocusOut>", lambda e: u_entry.insert(0, "Username") if not u_entry.get().strip() else None)
 
@@ -457,7 +410,6 @@ class TaskManagerApp(tk.Tk):
         tk.Button(card, text="Create an account", bg=CARD_BG, fg=BTN_LOGIN, font=("Arial", 10), bd=0,
                   cursor="hand2", command=self._show_signup).pack()
 
-        # Contextual active window Return binding
         self.bind("<Return>", lambda e: do_login())
 
     def _show_signup(self):
@@ -512,8 +464,6 @@ class TaskManagerApp(tk.Tk):
 
         self.bind("<Return>", lambda e: do_signup())
 
-    # ── PERSISTENCE ───────────────────────────
-
     def _save_tasks(self):
         all_tasks = load_json(DATA_FILE, [])
         other_tasks = [t for t in all_tasks if t.get("user") != self.current_user]
@@ -524,7 +474,6 @@ class TaskManagerApp(tk.Tk):
         self.tasks = [t for t in all_tasks if t.get("user") == self.current_user]
 
 
-# ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     app = TaskManagerApp()
     app.mainloop()
