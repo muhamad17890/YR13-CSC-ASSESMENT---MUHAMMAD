@@ -524,9 +524,7 @@ class TaskManagerApp(tk.Tk):
         self.tasks = [t for t in all_tasks if t.get("user") == self.current_user]
 
 
-# ─────────────────────────────────────────────
-#  ENTRY POINT
-# ─────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     app = TaskManagerApp()
     app.mainloop()
