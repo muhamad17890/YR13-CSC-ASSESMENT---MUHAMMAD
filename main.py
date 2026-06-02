@@ -14,7 +14,7 @@ import hashlib
 from datetime import datetime, date
 
 # ─────────────────────────────────────────────
-#  COLOUR CONSTANTS  (matches your design)
+#  COLOUR CONSTANTS
 # ─────────────────────────────────────────────
 SIDEBAR_BG    = "#3d2b6b"   # deep purple sidebar
 SIDEBAR_SEL   = "#c0392b"   # red highlight for active item
@@ -44,8 +44,11 @@ USERS_FILE = "users.json"
 
 def load_json(path, default):
     if os.path.exists(path):
-        with open(path, "r") as f:
-            return json.load(f)
+        try:
+            with open(path, "r") as f:
+                return json.load(f)
+        except json.JSONDecodeError:
+            return default
     return default
 
 def save_json(path, data):
@@ -64,13 +67,13 @@ class TaskManagerApp(tk.Tk):
         super().__init__()
         self.title("Student Task Manager")
         self.geometry("880x580")
-        self.resizable(True, True)
+        self.minsize(800, 500)
         self.configure(bg=SIDEBAR_BG)
 
         # State
         self.current_user  = None
         self.current_view  = "all"
-        self.tasks         = []          # list of task dicts
+        self.tasks         = []
         self.users         = load_json(USERS_FILE, {})
 
         # Build layout frames
@@ -109,7 +112,7 @@ class TaskManagerApp(tk.Tk):
                                   bg=BTN_LOGIN, fg="white",
                                   font=("Arial", 10, "bold"), bd=0,
                                   padx=12, pady=4, cursor="hand2",
-                                  command=self._show_login)
+                                  command=self._logout_or_login)
 
         # Pack right-to-left
         self.btn_auth.pack(side="right", padx=6, pady=8)
@@ -148,8 +151,6 @@ class TaskManagerApp(tk.Tk):
             btn.pack(fill="x")
             self.nav_btns[key] = btn
 
-        self._highlight_nav("all")
-
     def _highlight_nav(self, active_key):
         for key, btn in self.nav_btns.items():
             btn.configure(bg=SIDEBAR_SEL if key == active_key else SIDEBAR_BG)
@@ -161,8 +162,19 @@ class TaskManagerApp(tk.Tk):
         self.content.pack(side="left", fill="both", expand=True)
 
     def _clear_content(self):
+        self.unbind("<Return>") # Fixes the global keypress crash bug
         for w in self.content.winfo_children():
             w.destroy()
+
+    def _logout_or_login(self):
+        if self.current_user:
+            if messagebox.askyesno("Logout", "Are you sure you want to log out?"):
+                self.current_user = None
+                self.tasks = []
+                self.btn_auth.configure(text="Login / Signup")
+                self._show_login()
+        else:
+            self._show_login()
 
     # ── VIEWS ─────────────────────────────────
 
@@ -188,47 +200,57 @@ class TaskManagerApp(tk.Tk):
         # Header
         header = tk.Frame(self.content, bg=CONTENT_BG)
         header.pack(fill="x", padx=24, pady=(20, 8))
-        tk.Label(header, text=titles[view_key], bg=CONTENT_BG,
+        tk.Label(header, text=titles.get(view_key, "Tasks"), bg=CONTENT_BG,
                  fg=TEXT_DARK, font=("Georgia", 18, "bold")).pack(side="left")
 
-        # Scrollable task list
+        # Scrollable canvas setup
         canvas = tk.Canvas(self.content, bg=CONTENT_BG, highlightthickness=0)
         scrollbar = ttk.Scrollbar(self.content, orient="vertical", command=canvas.yview)
         self.task_frame = tk.Frame(canvas, bg=CONTENT_BG)
 
-        self.task_frame.bind("<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.create_window((0, 0), window=self.task_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
+        # Dynamic scroll bounds tracking
+        self.task_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
 
+        # Dynamic responsive layout resizing window width connection
+        canvas_window = canvas.create_window((0, 0), window=self.task_frame, anchor="nw")
+        canvas.bind(
+            "<Configure>",
+            lambda e: canvas.itemconfigure(canvas_window, width=e.width)
+        )
+
+        canvas.configure(yscrollcommand=scrollbar.set)
         canvas.pack(side="left", fill="both", expand=True, padx=(20, 0), pady=4)
         scrollbar.pack(side="right", fill="y")
 
-        # Mouse wheel
-        canvas.bind_all("<MouseWheel>",
-                        lambda e: canvas.yview_scroll(-1*(e.delta//120), "units"))
+        # Cross-platform safe mousewheel setup
+        canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(-1 * (e.delta // 120), "units"))
 
         self._render_tasks(view_key)
 
     def _render_tasks(self, view_key, filter_priority=None):
-        # Clear old cards
         for w in self.task_frame.winfo_children():
             w.destroy()
 
         tasks = self.tasks
 
-        # Filter by view
+        # Filter views safely
         if view_key == "high":
             tasks = [t for t in tasks if t["priority"] == "High" and not t["done"]]
         elif view_key == "completed":
             tasks = [t for t in tasks if t["done"]]
         elif view_key == "upcoming":
-            today = date.today()
-            tasks = [t for t in tasks
-                     if not t["done"] and t.get("due_date")]
-            tasks = sorted(tasks, key=lambda t: t["due_date"])
+            tasks = [t for t in tasks if not t["done"] and t.get("due_date")]
+            def parse_date(t):
+                try:
+                    return datetime.strptime(t["due_date"], "%Y-%m-%d").date()
+                except ValueError:
+                    return date.max # Safely shifts invalid strings to the bottom
+            tasks = sorted(tasks, key=parse_date)
 
-        # Filter by priority dropdown
+        # Dropdown management filtering
         if filter_priority and filter_priority != "All":
             tasks = [t for t in tasks if t["priority"] == filter_priority]
 
@@ -244,19 +266,16 @@ class TaskManagerApp(tk.Tk):
     def _build_task_card(self, parent, task, index):
         card = tk.Frame(parent, bg=CARD_BG, bd=0,
                         highlightthickness=1,
-                        highlightbackground="#d8d8e8",
-                        cursor="arrow")
-        card.pack(fill="x", padx=4, pady=4)
+                        highlightbackground="#d8d8e8")
+        # Shifted right padding to prevent scrollbar overlapping
+        card.pack(fill="x", padx=(4, 15), pady=4)
 
-        # Priority colour strip
         pri_color = PRIORITY_COLORS.get(task["priority"], "#999")
         strip = tk.Frame(card, bg=pri_color, width=5)
         strip.pack(side="left", fill="y")
 
-        # Icon + text
         icon = PRIORITY_ICONS.get(task["priority"], "•")
-        icon_lbl = tk.Label(card, text=icon, bg=CARD_BG,
-                            fg=pri_color, font=("Arial", 14))
+        icon_lbl = tk.Label(card, text=icon, bg=CARD_BG, fg=pri_color, font=("Arial", 14))
         icon_lbl.pack(side="left", padx=(10, 6), pady=12)
 
         info = tk.Frame(card, bg=CARD_BG)
@@ -265,27 +284,21 @@ class TaskManagerApp(tk.Tk):
         font_task = ("Arial", 11, "bold")
         fg_task   = TEXT_MID if task["done"] else TEXT_DARK
         name_text = ("✔  " if task["done"] else "") + task["name"]
-        tk.Label(info, text=name_text, bg=CARD_BG,
-                 fg=fg_task, font=font_task, anchor="w").pack(anchor="w")
+        tk.Label(info, text=name_text, bg=CARD_BG, fg=fg_task, font=font_task, anchor="w").pack(fill="x", anchor="w")
 
         due = task.get("due_date", "")
         due_text = f"Due {due}" if due else "No due date"
-        tk.Label(info, text=due_text, bg=CARD_BG,
-                 fg=TEXT_MID, font=("Arial", 9), anchor="w").pack(anchor="w")
+        tk.Label(info, text=due_text, bg=CARD_BG, fg=TEXT_MID, font=("Arial", 9), anchor="w").pack(fill="x", anchor="w")
 
         subject = task.get("subject", "")
         if subject:
-            tk.Label(info, text=subject, bg=CARD_BG,
-                     fg=ACCENT_PURPLE, font=("Arial", 8), anchor="w").pack(anchor="w")
+            tk.Label(info, text=subject, bg=CARD_BG, fg=ACCENT_PURPLE, font=("Arial", 8), anchor="w").pack(fill="x", anchor="w")
 
-        # Checkbox / Done toggle
         chk_var = tk.BooleanVar(value=task["done"])
-        chk = tk.Checkbutton(card, variable=chk_var, bg=CARD_BG,
-                              activebackground=CARD_BG,
-                              command=lambda t=task, v=chk_var: self._toggle_done(t, v))
+        chk = tk.Checkbutton(card, variable=chk_var, bg=CARD_BG, activebackground=CARD_BG,
+                             command=lambda t=task, v=chk_var: self._toggle_done(t, v))
         chk.pack(side="right", padx=8)
 
-        # Delete button
         del_btn = tk.Button(card, text="🗑", bg=CARD_BG, fg="#cc4444",
                             font=("Arial", 11), bd=0, cursor="hand2",
                             command=lambda t=task: self._delete_task(t))
@@ -307,8 +320,7 @@ class TaskManagerApp(tk.Tk):
     def _toggle_filter(self):
         menu = tk.Menu(self, tearoff=0)
         for p in ["All", "High", "Medium", "Low"]:
-            menu.add_command(label=p,
-                command=lambda pr=p: self._apply_filter(pr))
+            menu.add_command(label=p, command=lambda pr=p: self._apply_filter(pr))
         x = self.btn_filter.winfo_rootx()
         y = self.btn_filter.winfo_rooty() + self.btn_filter.winfo_height()
         menu.tk_popup(x, y)
@@ -326,20 +338,17 @@ class TaskManagerApp(tk.Tk):
 
         dialog = tk.Toplevel(self)
         dialog.title("Add New Task")
-        dialog.geometry("400x360")
+        dialog.geometry("400x380")
         dialog.configure(bg=CONTENT_BG)
         dialog.grab_set()
         dialog.resizable(False, False)
 
-        tk.Label(dialog, text="Add New Task", bg=CONTENT_BG,
-                 fg=TEXT_DARK, font=("Georgia", 14, "bold")).pack(pady=(20, 12))
+        tk.Label(dialog, text="Add New Task", bg=CONTENT_BG, fg=TEXT_DARK, font=("Georgia", 14, "bold")).pack(pady=(20, 12))
 
         def field(label_text, widget_factory):
             row = tk.Frame(dialog, bg=CONTENT_BG)
             row.pack(fill="x", padx=30, pady=4)
-            tk.Label(row, text=label_text, bg=CONTENT_BG,
-                     fg=TEXT_DARK, font=("Arial", 10), width=12,
-                     anchor="w").pack(side="left")
+            tk.Label(row, text=label_text, bg=CONTENT_BG, fg=TEXT_DARK, font=("Arial", 10), width=12, anchor="w").pack(side="left")
             w = widget_factory(row)
             w.pack(side="left", fill="x", expand=True)
             return w
@@ -348,32 +357,38 @@ class TaskManagerApp(tk.Tk):
         subject_entry = field("Subject:", lambda p: tk.Entry(p, font=("Arial", 10)))
         due_entry     = field("Due Date:", lambda p: tk.Entry(p, font=("Arial", 10)))
 
-        # Priority radio
         pri_frame = tk.Frame(dialog, bg=CONTENT_BG)
         pri_frame.pack(fill="x", padx=30, pady=6)
-        tk.Label(pri_frame, text="Priority:", bg=CONTENT_BG,
-                 fg=TEXT_DARK, font=("Arial", 10), width=12, anchor="w").pack(side="left")
+        tk.Label(pri_frame, text="Priority:", bg=CONTENT_BG, fg=TEXT_DARK, font=("Arial", 10), width=12, anchor="w").pack(side="left")
+
         pri_var = tk.StringVar(value="Medium")
         for p, c in PRIORITY_COLORS.items():
             tk.Radiobutton(pri_frame, text=p, variable=pri_var, value=p,
-                           bg=CONTENT_BG, fg=c,
-                           activebackground=CONTENT_BG,
-                           selectcolor=CONTENT_BG,
-                           font=("Arial", 10, "bold")).pack(side="left", padx=6)
+                           bg=CONTENT_BG, fg=c, activebackground=CONTENT_BG,
+                           selectcolor=CONTENT_BG, font=("Arial", 10, "bold")).pack(side="left", padx=6)
 
-        # Hint for due date
-        tk.Label(dialog, text="Due Date format: YYYY-MM-DD (e.g. 2025-12-01)",
-                 bg=CONTENT_BG, fg=TEXT_MID, font=("Arial", 8)).pack()
+        tk.Label(dialog, text="Due Date format: YYYY-MM-DD (e.g. 2026-12-01)", bg=CONTENT_BG, fg=TEXT_MID, font=("Arial", 8)).pack(pady=4)
 
         def submit():
             name = name_entry.get().strip()
+            due_date_str = due_entry.get().strip()
+
             if not name:
                 messagebox.showwarning("Missing", "Please enter a task name.", parent=dialog)
                 return
+
+            # Form validation checks format before appending dictionary
+            if due_date_str:
+                try:
+                    datetime.strptime(due_date_str, "%Y-%m-%d")
+                except ValueError:
+                    messagebox.showwarning("Invalid Date", "Please write the date in YYYY-MM-DD format.", parent=dialog)
+                    return
+
             self.tasks.append({
                 "name":     name,
                 "subject":  subject_entry.get().strip(),
-                "due_date": due_entry.get().strip(),
+                "due_date": due_date_str,
                 "priority": pri_var.get(),
                 "done":     False,
                 "user":     self.current_user,
@@ -391,43 +406,35 @@ class TaskManagerApp(tk.Tk):
     def _show_login(self):
         self._clear_content()
         self.current_view = "login"
-        self._highlight_nav("all")  # nothing highlighted
+        self._highlight_nav(None)
 
-        # Outer centring frame
         outer = tk.Frame(self.content, bg=CONTENT_BG)
         outer.pack(expand=True)
 
-        # Card
-        card = tk.Frame(outer, bg=CARD_BG, bd=0,
-                        highlightthickness=1, highlightbackground="#ccccdd",
-                        padx=40, pady=36)
+        card = tk.Frame(outer, bg=CARD_BG, bd=0, highlightthickness=1, highlightbackground="#ccccdd", padx=40, pady=36)
         card.pack(padx=60, pady=60)
 
-        tk.Label(card, text="Login", bg=CARD_BG,
-                 fg=TEXT_DARK, font=("Georgia", 18, "bold")).pack(pady=(0, 20))
+        tk.Label(card, text="Login", bg=CARD_BG, fg=TEXT_DARK, font=("Georgia", 18, "bold")).pack(pady=(0, 20))
 
-        # Username
         u_frame = tk.Frame(card, bg=CARD_BG)
         u_frame.pack(fill="x", pady=6)
         tk.Label(u_frame, text="👤", bg=CARD_BG, font=("Arial", 12)).pack(side="left", padx=(0, 6))
-        u_entry = tk.Entry(u_frame, font=("Arial", 11), bd=1, relief="solid",
-                           width=24)
+        u_entry = tk.Entry(u_frame, font=("Arial", 11), bd=1, relief="solid", width=24)
         u_entry.insert(0, "Username")
         u_entry.pack(side="left")
-        u_entry.bind("<FocusIn>",  lambda e: u_entry.delete(0, "end") if u_entry.get() == "Username" else None)
-        u_entry.bind("<FocusOut>", lambda e: u_entry.insert(0, "Username") if not u_entry.get() else None)
 
-        # Password
+        # Validated placeholder configurations
+        u_entry.bind("<FocusIn>",  lambda e: u_entry.delete(0, "end") if u_entry.get() == "Username" else None)
+        u_entry.bind("<FocusOut>", lambda e: u_entry.insert(0, "Username") if not u_entry.get().strip() else None)
+
         p_frame = tk.Frame(card, bg=CARD_BG)
         p_frame.pack(fill="x", pady=6)
         tk.Label(p_frame, text="🔒", bg=CARD_BG, font=("Arial", 12)).pack(side="left", padx=(0, 6))
-        p_entry = tk.Entry(p_frame, font=("Arial", 11), bd=1, relief="solid",
-                           width=24, show="•")
+        p_entry = tk.Entry(p_frame, font=("Arial", 11), bd=1, relief="solid", width=24, show="•")
         p_entry.pack(side="left")
 
         msg_var = tk.StringVar()
-        tk.Label(card, textvariable=msg_var, bg=CARD_BG,
-                 fg="#c0392b", font=("Arial", 9)).pack()
+        tk.Label(card, textvariable=msg_var, bg=CARD_BG, fg="#c0392b", font=("Arial", 9)).pack()
 
         def do_login():
             u = u_entry.get().strip()
@@ -438,22 +445,19 @@ class TaskManagerApp(tk.Tk):
             if u in self.users and self.users[u] == hash_pw(p):
                 self.current_user = u
                 self._load_tasks()
-                self.btn_auth.configure(text=f"  {u}  ▾")
+                self.btn_auth.configure(text=f" Logged in: {u} ")
                 self._switch_view("all")
             else:
                 msg_var.set("Incorrect username or password.")
 
         tk.Button(card, text="Log In", bg=BTN_LOGIN, fg="white",
                   font=("Arial", 11, "bold"), bd=0, padx=0, pady=8,
-                  cursor="hand2", width=24,
-                  command=do_login).pack(pady=12)
+                  cursor="hand2", width=24, command=do_login).pack(pady=12)
 
-        tk.Button(card, text="Create an account", bg=CARD_BG,
-                  fg=BTN_LOGIN, font=("Arial", 10), bd=0,
-                  cursor="hand2",
-                  command=self._show_signup).pack()
+        tk.Button(card, text="Create an account", bg=CARD_BG, fg=BTN_LOGIN, font=("Arial", 10), bd=0,
+                  cursor="hand2", command=self._show_signup).pack()
 
-        # Allow Enter key
+        # Contextual active window Return binding
         self.bind("<Return>", lambda e: do_login())
 
     def _show_signup(self):
@@ -462,34 +466,28 @@ class TaskManagerApp(tk.Tk):
         outer = tk.Frame(self.content, bg=CONTENT_BG)
         outer.pack(expand=True)
 
-        card = tk.Frame(outer, bg=CARD_BG, bd=0,
-                        highlightthickness=1, highlightbackground="#ccccdd",
-                        padx=40, pady=36)
+        card = tk.Frame(outer, bg=CARD_BG, bd=0, highlightthickness=1, highlightbackground="#ccccdd", padx=40, pady=36)
         card.pack(padx=60, pady=60)
 
-        tk.Label(card, text="Create Account", bg=CARD_BG,
-                 fg=TEXT_DARK, font=("Georgia", 18, "bold")).pack(pady=(0, 20))
+        tk.Label(card, text="Create Account", bg=CARD_BG, fg=TEXT_DARK, font=("Georgia", 18, "bold")).pack(pady=(0, 20))
 
         fields = {}
         for lbl in ["Username", "Password", "Confirm Password"]:
             f = tk.Frame(card, bg=CARD_BG)
             f.pack(fill="x", pady=5)
-            tk.Label(f, text=lbl, bg=CARD_BG, fg=TEXT_DARK,
-                     font=("Arial", 10), width=16, anchor="w").pack(side="left")
-            e = tk.Entry(f, font=("Arial", 11), bd=1, relief="solid",
-                         show="•" if "Password" in lbl else "", width=20)
+            tk.Label(f, text=lbl, bg=CARD_BG, fg=TEXT_DARK, font=("Arial", 10), width=16, anchor="w").pack(side="left")
+            e = tk.Entry(f, font=("Arial", 11), bd=1, relief="solid", show="•" if "Password" in lbl else "", width=20)
             e.pack(side="left")
             fields[lbl] = e
 
         msg_var = tk.StringVar()
-        tk.Label(card, textvariable=msg_var, bg=CARD_BG,
-                 fg="#c0392b", font=("Arial", 9)).pack()
+        tk.Label(card, textvariable=msg_var, bg=CARD_BG, fg="#c0392b", font=("Arial", 9)).pack()
 
         def do_signup():
             u = fields["Username"].get().strip()
             p = fields["Password"].get().strip()
             c = fields["Confirm Password"].get().strip()
-            if not u or not p:
+            if not u or not p or not c:
                 msg_var.set("Please fill all fields.")
                 return
             if p != c:
@@ -502,22 +500,22 @@ class TaskManagerApp(tk.Tk):
             save_json(USERS_FILE, self.users)
             self.current_user = u
             self._load_tasks()
-            self.btn_auth.configure(text=f"  {u}  ▾")
+            self.btn_auth.configure(text=f" Logged in: {u} ")
             self._switch_view("all")
 
         tk.Button(card, text="Sign Up", bg=BTN_LOGIN, fg="white",
                   font=("Arial", 11, "bold"), bd=0, padx=0, pady=8,
                   cursor="hand2", width=22, command=do_signup).pack(pady=12)
 
-        tk.Button(card, text="← Back to Login", bg=CARD_BG,
-                  fg=BTN_LOGIN, font=("Arial", 10), bd=0,
+        tk.Button(card, text="← Back to Login", bg=CARD_BG, fg=BTN_LOGIN, font=("Arial", 10), bd=0,
                   cursor="hand2", command=self._show_login).pack()
+
+        self.bind("<Return>", lambda e: do_signup())
 
     # ── PERSISTENCE ───────────────────────────
 
     def _save_tasks(self):
         all_tasks = load_json(DATA_FILE, [])
-        # Remove current user's tasks, re-add updated list
         other_tasks = [t for t in all_tasks if t.get("user") != self.current_user]
         save_json(DATA_FILE, other_tasks + self.tasks)
 
